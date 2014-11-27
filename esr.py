@@ -2,7 +2,7 @@
 import numpy as np
 import argparse
 import cv2
-
+from matplotlib import pyplot as plt
  
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
@@ -15,42 +15,33 @@ image = cv2.imread(args["image"])
 
 orig = image.copy()
 
-ratio = 400.0 / image.shape[1]
-dim = (400, int(image.shape[0] * ratio))
- 
+sz = 500
+ratio = (sz + 0.0) / image.shape[1]
+dim = (sz, int(image.shape[0] * ratio))
 image = cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
 
-image = cv2.blur(image, (3, 3))
+planes = cv2.split(image)
+for i in range(len(planes)):
+	planes[i] = cv2.cvtColor(planes[i], cv2.COLOR_GRAY2RGB)
 
-hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-lower = np.array([12, 5, 0], dtype = "uint8")
-upper = np.array([35, 255, 255], dtype = "uint8")
-mask = cv2.inRange(hsv, lower, upper)
+vis1 = np.concatenate((image, planes[0]), axis=1)
+vis2 = np.concatenate((planes[1], planes[2]), axis=1)
+vis = np.concatenate((vis1, vis2), axis=0)
+cv2.imshow("Image", vis)
 
-kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 7))
-mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+"""
 
-#kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-#mask = cv2.erode(mask, kernel, iterations = 1)
-#mask = cv2.dilate(mask, kernel, iterations = 1)
+plt.subplot(2,2,1),plt.imshow(image,cmap = 'gray')
+plt.title('Original'), plt.xticks([]), plt.yticks([])
+plt.subplot(2,2,2),plt.imshow(laplacian,cmap = 'gray')
+plt.title('Laplacian'), plt.xticks([]), plt.yticks([])
+plt.subplot(2,2,3),plt.imshow(sobelx,cmap = 'gray')
+plt.title('Sobel X'), plt.xticks([]), plt.yticks([])
+plt.subplot(2,2,4),plt.imshow(sobely,cmap = 'gray')
+plt.title('Sobel Y'), plt.xticks([]), plt.yticks([])
 
-#mask = cv2.Canny(mask, 30, 200)
-
-#cv2.imshow('Image - %d %d %d' % (d, sc, ss), mask)
-#cv2.imwrite('mask.%d.%d.%d.%d.%d.png' % (d, ss, sc, mn, mx), mask)
-cv2.imshow("images", mask)
-
-#kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
-#mask = cv2.erode(mask, kernel, iterations = 2)
-#mask = cv2.dilate(mask, kernel, iterations = 2)
-
-#gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-#gray = cv2.bilateralFilter(gray, 11, 17, 17)
-#cv2.imshow('Image', gray)
-
-#edged = cv2.Canny(gray, 30, 200)
-#cv2.imshow('Image - edged', edged)
-
+plt.show()
+"""
 
 cv2.waitKey(0)
