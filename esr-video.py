@@ -38,10 +38,6 @@ while True:
 	sharrx = cv2.Scharr(gray, cv2.CV_8U, 1, 0)
 	sharry = cv2.Scharr(gray, cv2.CV_8U, 0, 1)
 
-	vgray = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-	vlap = cv2.cvtColor(laplacian, cv2.COLOR_GRAY2BGR)
-	vsob = cv2.cvtColor(sobelx, cv2.COLOR_GRAY2BGR)
-
 	cv2.imshow("Image", display([sharrx, sharry, image, sobelx, sobely, gray]))
 
 	# if the 'q' key is pressed, stop the loop
