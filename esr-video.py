@@ -6,6 +6,21 @@ from matplotlib import pyplot as plt
  
 camera = cv2.VideoCapture(0)
 
+def display(imgs):
+	nx = int(np.ceil(np.sqrt(len(imgs))))
+	ny = np.ceil((len(imgs) + 0.0)/nx)
+	rows = []
+	for y in range(int(ny)):
+		irow = imgs[y * nx : (y + 1) * nx]
+		while len(irow) < nx:
+			irow.append(irow[-1])
+		for i in range(len(irow)):
+			if len(irow[i].shape) != 3 or irow[i].shape[2] != 3:
+				irow[i] = cv2.cvtColor(irow[i], cv2.COLOR_GRAY2BGR)
+		row = np.concatenate(irow, axis=1)
+		rows.append(row)
+	return np.concatenate(rows, axis=0)
+
 while True:
 
 	(grabbed, frame) = camera.read()
@@ -15,29 +30,21 @@ while True:
 	ratio = (sz + 0.0) / image.shape[1]
 	dim = (sz, int(image.shape[0] * ratio))
 	image = cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
-	converted = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)	
+	gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-	planes = cv2.split(converted)
-	for i in range(len(planes)):
-		planes[i] = cv2.cvtColor(planes[i], cv2.COLOR_GRAY2RGB)
+	laplacian = cv2.Laplacian(gray,cv2.CV_8U)
+	sobelx = cv2.Sobel(gray,cv2.CV_8U,1,0,ksize=5)
+	sobely = cv2.Sobel(gray,cv2.CV_8U,0,1,ksize=5)
+	sharrx = cv2.Scharr(gray, cv2.CV_8U, 1, 0)
+	sharry = cv2.Scharr(gray, cv2.CV_8U, 0, 1)
 
-	vis1 = np.concatenate((image, planes[0]), axis=1)
-	vis2 = np.concatenate((planes[1], planes[2]), axis=1)
-	vis = np.concatenate((vis1, vis2), axis=0)
-	cv2.imshow("Image", vis)
+	vgray = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+	vlap = cv2.cvtColor(laplacian, cv2.COLOR_GRAY2BGR)
+	vsob = cv2.cvtColor(sobelx, cv2.COLOR_GRAY2BGR)
 
-"""
+	cv2.imshow("Image", display([sharrx, sharry, image, sobelx, sobely, gray]))
 
-plt.subplot(2,2,1),plt.imshow(image,cmap = 'gray')
-plt.title('Original'), plt.xticks([]), plt.yticks([])
-plt.subplot(2,2,2),plt.imshow(laplacian,cmap = 'gray')
-plt.title('Laplacian'), plt.xticks([]), plt.yticks([])
-plt.subplot(2,2,3),plt.imshow(sobelx,cmap = 'gray')
-plt.title('Sobel X'), plt.xticks([]), plt.yticks([])
-plt.subplot(2,2,4),plt.imshow(sobely,cmap = 'gray')
-plt.title('Sobel Y'), plt.xticks([]), plt.yticks([])
+	# if the 'q' key is pressed, stop the loop
+	if cv2.waitKey(1) & 0xFF == ord("q"):
+		break
 
-plt.show()
-"""
-
-cv2.waitKey(0)
