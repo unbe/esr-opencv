@@ -228,7 +228,9 @@ def process(image):
       longestIndex = np.argmax(np.sum((g[:,1:2,:] - g[:,0:1,:])**2, axis=2))
       longestLine = goodLines[longestIndex]
       cv2.line(image, longestLine[0], longestLine[1], (200, 200, 0), 2)
-      cv2.drawContours(image, [goodBoxes[longestIndex]], -1, (200, 200, 0), 2)
+      #cv2.drawContours(image, [goodBoxes[longestIndex]], -1, (200, 200, 0), 2)
+      cv2.circle(image, goodBoxes[longestIndex][0], 5, (200, 200, 0), 2)
+      
           
 
   if Param.Value('lines'):
