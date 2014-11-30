@@ -1,9 +1,53 @@
-# import the necessary packages
 import numpy as np
 import argparse
 import cv2
-from matplotlib import pyplot as plt
+import tesseract
  
+
+def moduloTenRecursive(number):
+    lut = [0, 9, 4, 6, 8, 2, 7, 1, 3, 5];
+    carryover = 0;
+    for i in str(number):
+        t = carryover + int(i)
+        carryover = lut[t % 10];
+    return str((10 - carryover) % 10)
+
+def generateCodeline(bc, chf, rappen, help1, referenceNumber, help2, participantNumber, help3):
+    chf = str(chf)
+    rappen = str(rappen) 
+    if len(chf) < 8:  # check if amount has less than eight chars
+        chf = (8-len(chf))*"0" + chf
+        
+    # dynamic, check digit for bc and value (calculated with modulo 10 recursive)
+    p1 = moduloTenRecursive(bc + chf + rappen);
+
+    # dynamic, check digit for referenceNumber (calculated with modulo 10 recursive)
+    p2 = moduloTenRecursive(referenceNumber);
+
+    # dynamic, check digit for participantNumber (calculated with modulo 10 recursive)
+    p3 = moduloTenRecursive(participantNumber);
+    return bc + chf + rappen + p1 + help1 + referenceNumber + p2 + help2 + " " + participantNumber + p3 + help3;
+
+
+def fixEsr(text):
+  text = text.replace(' ','')
+  text = text.replace('>','')
+  text = text.replace('+','')
+  if len(text) < 49:
+    return None
+  bc = text[0:2]
+  chf = text[2:10]
+  rappen = text[10:12]
+  check1 = text[12:13]
+  ref = text[13:39]
+  check2 = text[39:40]
+  account = text[40:48]
+  check3 = text[48:49] 
+  if (check1 != moduloTenRecursive(bc + chf + rappen) or 
+      check2 != moduloTenRecursive(referenceNumber) or 
+      check3 != moduloTenRecursive(participantNumber)):
+    return None
+  return generateCodeline(bc, chf, rappen, '>', ref, '+', account, '>')
 
 class Param(object):
   keys = {}
@@ -70,6 +114,7 @@ Param("contours", "c", True)
 Param("all_contours", "a", False)
 Param("lines_p", "p", True)
 Param("lines", "l", False)
+Param("ocr", "o", True)
 Param("line_filter", "f", False)
 Param("show_bad_lines", "x", False)
 Param("lines_threshold", "t", 100, 0, 255)
@@ -83,12 +128,7 @@ ap.add_argument("-c", "--camera", action='store_true', help = "Use camera")
 ap.add_argument("-i", "--image", help = "Use image")
 args = vars(ap.parse_args())
 
-def geoPointLineDist(p, seg, testSegmentEnds=True):
-    """
-    Minimum Distance between a Point and a Line
-    Written by Paul Bourke,    October 1988
-    http://astronomy.swin.edu.au/~pbourke/geometry/pointline/
-    """
+def geoClosestPoint(p, seg, testSegmentEnds=True):
     y3,x3 = p
     (y1,x1),(y2,x2) = seg
 
@@ -113,11 +153,18 @@ def geoPointLineDist(p, seg, testSegmentEnds=True):
             x,y = x1,y1
         elif u >1:
             x,y = x2,y2
-    
+    return (y, x)    
 
+def geoPointLineDist(p, seg, testSegmentEnds=True):
+    """
+    Minimum Distance between a Point and a Line
+    Written by Paul Bourke,    October 1988
+    http://astronomy.swin.edu.au/~pbourke/geometry/pointline/
+    """
+    (y, x) = geoClosestPoint(p, seg, testSegmentEnds)
+    y3,x3 = p
     dx30 = x3-x
     dy30 = y3-y
-
     return np.sqrt( dx30*dx30 + dy30*dy30 )
 
 
@@ -136,10 +183,13 @@ def display(imgs):
     rows.append(row)
   return np.concatenate(rows, axis=0)
 
+tess_api = None
 def process(image):
+  global tess_api
   sz = 500
   ratio = (sz + 0.0) / image.shape[1]
   dim = (sz, int(image.shape[0] * ratio))
+  orig = image
   image = cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
   if Param.Value("bilateral"):
     bila = cv2.bilateralFilter(image, 11, 17, 17)
@@ -174,12 +224,11 @@ def process(image):
       if len(approx) == 4:
         d01 = np.sum((approx[0]-approx[1])**2)
         d12 = np.sum((approx[1]-approx[2])**2)
-        ratio = np.sqrt(np.divide(float(d01), d12))
-        #print ratio, approx
-        if ratio > 1.5 and ratio < 3:
+        wh_ratio = np.sqrt(np.divide(float(d01), d12))
+        if wh_ratio > 1.5 and wh_ratio < 3:
           good = True
-        elif 1/ratio > 1.5 and 1/ratio < 3:
-          approx = np.roll(approx, 2)
+        elif 1/wh_ratio > 1.5 and 1/wh_ratio < 3:
+          approx = np.roll(approx, 1, axis=0)
           good = True
 
       if good:
@@ -192,6 +241,7 @@ def process(image):
       cv2.drawContours(image, badCnts, -1, (128, 128, 0), 1)
 
       
+  warped = None
     
   if Param.Value('lines_p') and len(goodCnts) > 0:
     lines = cv2.HoughLinesP(canny, 1, np.pi/180, Param.Value('lines_threshold'), minLineLength = Param.Value('lines_minlength'), maxLineGap = Param.Value('lines_maxgap'))
@@ -203,16 +253,20 @@ def process(image):
     goodBoxes = []
     badLines = []
     for line in lines:        
-      line = ((line[0], line[1]), (line[2], line[3]))
+      line = np.array([[line[0], line[1]], [line[2], line[3]]])
+      length2 = np.sum((line[0]-line[1])**2)
       ok = False
       for cnt in goodCnts:
+        minLength2 = np.sum((cnt[0]-cnt[3])**2) * 2
+        if length2 < minLength2:
+          continue
         d = [geoPointLineDist(point[0], line) for point in cnt]
         if d[0] < 10 and d[3] < 10:
           goodLines.append(line)
           goodBoxes.append(cnt)
         elif d[1] < 10 and d[2] < 10:
           goodLines.append(line)
-          goodBoxes.append(np.roll(cnt, 2))
+          goodBoxes.append(np.roll(cnt, 2, axis=0))
         elif Param.Value('show_bad_lines'):
           badLines.append(line)
 
@@ -224,15 +278,47 @@ def process(image):
 
     if len(goodLines) > 0:
       g = np.array(goodLines)
-      print repr(g)
       longestIndex = np.argmax(np.sum((g[:,1:2,:] - g[:,0:1,:])**2, axis=2))
       longestLine = goodLines[longestIndex]
-      cv2.line(image, longestLine[0], longestLine[1], (200, 200, 0), 2)
-      #cv2.drawContours(image, [goodBoxes[longestIndex]], -1, (200, 200, 0), 2)
-      cv2.circle(image, goodBoxes[longestIndex][0], 5, (200, 200, 0), 2)
-      
-          
+      cv2.line(image, tuple(longestLine[0]), tuple(longestLine[1]), (200, 200, 0), 2)
+      box = goodBoxes[longestIndex]
+      tl = np.array(geoClosestPoint(box[0][0], longestLine, False))
+      bl = np.array(geoClosestPoint(box[3][0], longestLine, False))
+      tr = box[1][0]
+      br = box[2][0]
 
+      h = bl - tl
+      tl = tl + h * 3
+      bl = tl + h
+      h = br - tr
+      tr = tr + h * 3
+      br = tr + h
+
+      w = tr - tl
+      tl = tl - w * 1.1
+      tr = tr + w * 0.6
+      w = br - bl
+      bl = bl - w * 1.1
+      br = br + w * 0.6
+
+      tl = tl/ratio
+      tr = tr/ratio
+      bl = bl/ratio
+      br = br/ratio
+
+      width = int(np.sqrt(np.sum((tl-tr)**2)))
+      height = int(np.sqrt(np.sum((tl-bl)**2)))
+
+      dst = np.array([
+          [0, 0],
+          [width - 1, 0],
+          [width - 1, height - 1],
+          [0, height - 1]], dtype = "float32")
+
+      rect = np.array([tl, tr, br, bl], dtype = "float32")
+      M = cv2.getPerspectiveTransform(rect, dst)
+      warped = cv2.warpPerspective(orig, M, (width, height))
+      
   if Param.Value('lines'):
     lines = cv2.HoughLines(canny, 1, np.pi/180, Param.Value('lines_threshold'))
     for rho,theta in (lines[0] if lines is not None else []):
@@ -248,6 +334,20 @@ def process(image):
 
   Param.DisplayAll(image)
   cv2.imshow("Image", display([image, bila, gray, canny]))
+  if warped is not None:
+    cv2.imshow("Image2", warped)
+    if Param.Value('ocr'):
+      if tess_api is None:
+        tess_api = tesseract.TessBaseAPI()
+        tess_api.Init(".","eng",tesseract.OEM_DEFAULT)
+        tess_api.SetVariable("tessedit_char_whitelist", "0123456789+>")
+        tess_api.SetPageSegMode(tesseract.PSM_AUTO)
+      cv2.imwrite("ocr.png", warped)   # SetCvImage segfauls. Fuck it.
+      pixImage=tesseract.pixRead("ocr.png") 
+      tess_api.SetImage(pixImage)
+      outText=tess_api.GetUTF8Text()
+      esr = fixEsr(outText):
+      print outText, esr
 
 
 if not args.get("camera", False):
