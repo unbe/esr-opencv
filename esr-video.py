@@ -2,8 +2,8 @@ import numpy as np
 import argparse
 import cv2
 import tesseract
+import re
  
-
 def moduloTenRecursive(number):
     lut = [0, 9, 4, 6, 8, 2, 7, 1, 3, 5];
     carryover = 0;
@@ -14,7 +14,7 @@ def moduloTenRecursive(number):
 
 def generateCodeline(bc, chf, rappen, help1, referenceNumber, help2, participantNumber, help3):
     chf = str(chf)
-    rappen = str(rappen) 
+    rappen = str(rappen)
     if len(chf) < 8:  # check if amount has less than eight chars
         chf = (8-len(chf))*"0" + chf
         
@@ -30,24 +30,38 @@ def generateCodeline(bc, chf, rappen, help1, referenceNumber, help2, participant
 
 
 def fixEsr(text):
-  text = text.replace(' ','')
-  text = text.replace('>','')
-  text = text.replace('+','')
-  if len(text) < 49:
+  text = re.sub(r'[^0-9+>]', '', text)
+  m = re.match('^([0-9]+)>([0-9]+)[+]([0-9]+)>?$', text)
+  if m is None:
     return None
-  bc = text[0:2]
-  chf = text[2:10]
-  rappen = text[10:12]
-  check1 = text[12:13]
-  ref = text[13:39]
-  check2 = text[39:40]
-  account = text[40:48]
-  check3 = text[48:49] 
-  if (check1 != moduloTenRecursive(bc + chf + rappen) or 
-      check2 != moduloTenRecursive(referenceNumber) or 
-      check3 != moduloTenRecursive(participantNumber)):
+  group1 = m.group(1)
+  if len(group1) < 13:
+    return None
+  bc = group1[0:2]
+  chf = group1[2:10]
+  rappen = group1[10:12]
+  check1 = group1[12]
+  
+  group2 = m.group(2)
+  if len(group2) < 2:
+    return None
+  ref = group2[0:-1]
+  check2 = group2[-1]
+
+  group3 = m.group(3)
+  if len(group3) < 2:
+    return None
+  account = group3[0:-1]
+  check3 = group3[-1]
+
+  print bc, chf, rappen, ref, account
+  if (check1 != moduloTenRecursive(bc + chf + rappen) or
+      check2 != moduloTenRecursive(ref) or
+      check3 != moduloTenRecursive(account)):
     return None
   return generateCodeline(bc, chf, rappen, '>', ref, '+', account, '>')
+
+print fixEsr('0100000120000>9901433580614622+ 010010930>')
 
 class Param(object):
   keys = {}
@@ -137,8 +151,8 @@ def geoClosestPoint(p, seg, testSegmentEnds=True):
     
     lensq21 = dx21*dx21 + dy21*dy21
     if lensq21 == 0:
-        dy = y3-y1 
-        dx = x3-x1 
+        dy = y3-y1
+        dx = x3-x1
         return np.sqrt( dx*dx + dy*dy )  # return point to point distance
 
     u = (x3-x1)*dx21 + (y3-y1)*dy21
@@ -288,10 +302,10 @@ def process(image):
       br = box[2][0]
 
       h = bl - tl
-      tl = tl + h * 3
+      tl = tl + h * 3.1
       bl = tl + h
       h = br - tr
-      tr = tr + h * 3
+      tr = tr + h * 3.1
       br = tr + h
 
       w = tr - tl
@@ -330,25 +344,32 @@ def process(image):
       y1 = int(y0 + 1000*(a))    # But if you want to round the number, then use np.around() function, then 3.8 --> 4.0
       x2 = int(x0 - 1000*(-b))   # But we need integers, so use int() function after that, ie int(np.around(x))
       y2 = int(y0 - 1000*(a))
-      cv2.line(image, (x1,y1), (x2,y2), (0,128,128), 2) 
+      cv2.line(image, (x1,y1), (x2,y2), (0,128,128), 2)
 
   Param.DisplayAll(image)
   cv2.imshow("Image", display([image, bila, gray, canny]))
   if warped is not None:
-    cv2.imshow("Image2", warped)
     if Param.Value('ocr'):
+      warped = cv2.bilateralFilter(warped, 11, 17, 17)
       if tess_api is None:
         tess_api = tesseract.TessBaseAPI()
         tess_api.Init(".","eng",tesseract.OEM_DEFAULT)
         tess_api.SetVariable("tessedit_char_whitelist", "0123456789+>")
         tess_api.SetPageSegMode(tesseract.PSM_AUTO)
       cv2.imwrite("ocr.png", warped)   # SetCvImage segfauls. Fuck it.
-      pixImage=tesseract.pixRead("ocr.png") 
+      pixImage=tesseract.pixRead("ocr.png")
       tess_api.SetImage(pixImage)
       outText=tess_api.GetUTF8Text()
-      esr = fixEsr(outText):
-      print outText, esr
-
+      for line in outText.split("\n"):
+        if len(line) > 40:
+          print line
+          esr = fixEsr(line)
+          if esr is None:
+            esr = fixEsr(re.sub(r'\d (\d)', '+ \\1', line))
+          print esr
+          if esr is not None:
+            cv2.putText(warped, esr, (10, 20), cv2.FONT_HERSHEY_PLAIN, 1, (0, 255, 128), 2)
+            cv2.imshow("Image2", warped)
 
 if not args.get("camera", False):
   image = cv2.imread(args["image"])
